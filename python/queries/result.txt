@@ -1,0 +1,3 @@
+Error in query string: Error processing job
+'pandora-154702:bqjob_r101f312a6703920_00000164470c2a80_1': Interval value must
+be coercible to INT64 type at [12:40]
