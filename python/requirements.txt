@@ -1,9 +1,0 @@
-pytz
-mypy
-websocket
-websocket-client
-pubnub>=4.0.13
-google-cloud-bigquery
-google-cloud-logging
-pandas-gbq
-sortedcontainers
