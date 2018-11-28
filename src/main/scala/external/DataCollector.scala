@@ -1,20 +1,15 @@
 package external
 
-import java.util.concurrent.atomic.AtomicInteger
-
-import scala.util.{Try, Success, Failure}
-import akka.actor.ActorSystem
 import akka.Done
-import akka.http.javadsl.ConnectionContext
+import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
-import akka.stream.ActorMaterializer
-import akka.stream.scaladsl._
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.ws._
-import akka.http.scaladsl.settings.ClientConnectionSettings
-import akka.util.ByteString
+import akka.stream.ActorMaterializer
+import akka.stream.scaladsl._
 
 import scala.concurrent.{Future, Promise}
+import scala.util.{Failure, Success}
 
 sealed trait Exchange {
   def name: String
@@ -29,16 +24,28 @@ object Exchanges {
 
 trait StreamApiReader[E <: Exchange] {}
 
-class TailFromWebSocket()(
+object TailFromWebSocket {
+  def apply(uri: Uri)(implicit system: ActorSystem, materializer: ActorMaterializer): TailFromWebSocket = {
+    new TailFromWebSocket(uri, Source.empty)
+  }
+}
+
+class TailFromWebSocket private (uri: Uri, firstRequest: Source[Message, _])(
     implicit system: ActorSystem,
     materializer: ActorMaterializer
 ) {
 
-  import akka.http.scaladsl.model.{HttpHeader, Uri}
-  def apply(uri: Uri, firstRequest: Source[Message, _])(sink: Sink[Message, Future[Done]]): Promise[Option[Message]] = {
-    import system.dispatcher
+  import akka.http.scaladsl.model.Uri
 
-    Source.maybe
+  def startsWith(firstRequest: Source[Message, _]) = new TailFromWebSocket(uri, firstRequest)
+
+  def into(sink: Sink[Message, Future[Done]]): Unit = {
+    attempt(uri, firstRequest, sink)
+  }
+
+  private def attempt(uri: Uri, firstRequest: Source[Message, _], sink: Sink[Message, Future[Done]])(
+      attemptCount: Int): Unit = {
+    import system.dispatcher
 
     val flow = Flow.fromSinkAndSourceMat(
       sink,
@@ -47,62 +54,54 @@ class TailFromWebSocket()(
 
     val request = WebSocketRequest(uri)
 
-//    val hoge = Http().webSocketClientFlow(request).joinMat()
-    val (upgradeResponse, closed) = Http().singleWebSocketRequest(request, flow)
+    val (upgradeResponse, promise): (Future[WebSocketUpgradeResponse], Promise[Option[Message]]) =
+      Http().singleWebSocketRequest(request, flow)
+
+    upgradeResponse.onComplete {
+      case Failure(exception) => {
+        println(exception.getMessage)
+        attempt(uri, firstRequest, sink)(attemptCount + 1)
+      }
+      case Success(value) => println(s"(attempt = $attemptCount)successfully conneced to $uri ")
+    }
 
     flow.alsoTo(
-      Sink.onComplete { done =>
-        done
-        ()
+      Sink.onComplete {
+        case Failure(exception) => {
+          println(exception.getMessage)
+          attempt(uri, firstRequest, sink)(attemptCount + 1)
+        }
+        case Success(done) => {
+          println("connection closed?")
+          attempt(uri, firstRequest, sink)(attemptCount + 1)
+        }
       }
     )
-
-//    Http().singleWebSocketRequest()
-
-//    ClientConnectionSettings()
-//    upgradeResponse.map{ r =>
-//
-//    }
-
-//    val connected = upgradeResponse.map { upgrade =>
-//      // just like a regular http request we can access response status which is available via upgrade.response.status
-//      // status code 101 (Switching Protocols) indicates that server support WebSockets
-//      if (upgrade.response.status == StatusCodes.SwitchingProtocols) {
-//        Done
-//      } else {
-//        throw new RuntimeException(s"Connection failed: ${upgrade.response.status}")
-//      }
-//    }
-    closed
-
-    //TODO: here error handling
-    closed
   }
+
 }
 
 class BitMexReader()(
     implicit
-    tailFromWebSocket: TailFromWebSocket,
     system: ActorSystem,
     materializer: ActorMaterializer
 ) {
   val bitmex = "wss://www.bitmex.com/realtime?subscribe=liquidation,quote,trade"
 
-  def apply(sink: Sink[Message, Future[Done]]): Promise[Option[Message]] = {
-    tailFromWebSocket(bitmex, Source.empty)(sink)
+  def apply(sink: Sink[Message, Future[Done]]): Unit = {
+    TailFromWebSocket(bitmex).into(sink)
   }
 }
 
 class BitFlyerReader()(
     implicit
-    tailFromWebSocket: TailFromWebSocket,
     system: ActorSystem,
     materializer: ActorMaterializer
 ) {
 
   val bitflyer = "wss://ws.lightstream.bitflyer.com/json-rpc"
 
-  def apply(sink: Sink[Message, Future[Done]]): Promise[Option[Message]] = {
+  def apply(sink: Sink[Message, Future[Done]]): Unit = {
     val subscribe =
       Source.single(
         TextMessage(
@@ -119,7 +118,7 @@ class BitFlyerReader()(
     //TODO: here error handling
     promise
      */
-    tailFromWebSocket(bitflyer, subscribe)(sink)
+    TailFromWebSocket(bitflyer).startsWith(subscribe).into(sink)
   }
 
 }
@@ -155,9 +154,9 @@ object DataCollector {
     val mexReader = new BitMexReader()
     val bfReader = new BitFlyerReader()
 
-//    val promise = bfReader(sink)
-//    val promise = mexReader(sink)
-    val _ = bfReader(sink)
+//    bfReader(sink)
+//    mexReader(sink)
+    bfReader(sink)
 
   }
 }
