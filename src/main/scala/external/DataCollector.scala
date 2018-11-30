@@ -10,6 +10,7 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.ws._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
+import external.websocket.TailFromWebSocket
 
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
@@ -21,111 +22,6 @@ object Exchanges {
   case object BitFlyer extends Exchange {
     def name = "bitFlyer"
   }
-}
-
-object RetryContext {
-  private val ResetSeconds = 3
-  def run(action: RetryContext => Unit)(implicit actorSystem: ActorSystem): Unit = {
-    action(
-      RetryContext(action, 0, java.time.LocalDateTime.now())
-    )
-  }
-}
-
-case class RetryContext private (action: RetryContext => Unit, count: Int = 0, attemptedAt: java.time.LocalDateTime) {
-  import scala.concurrent.duration._
-
-  private def toReset(now: java.time.LocalDateTime) = now.isAfter(attemptedAt.plusSeconds(RetryContext.ResetSeconds))
-
-  private def next = {
-    val now = java.time.LocalDateTime.now
-    if (toReset(now)) {
-      RetryContext(action, 0, java.time.LocalDateTime.now)
-    } else {
-      RetryContext(action, count + 1, now)
-    }
-  }
-
-  private def waitDuration(now: java.time.LocalDateTime) = {
-    val waitMsec = if (toReset(now)) {
-      1000
-    } else {
-      (1000 * Math.pow(2, count)).toInt
-    }
-    println(s"waiting ${waitMsec} ms")
-    waitMsec.milliseconds
-  }
-
-  def retry()(implicit actorSystem: ActorSystem): Unit = {
-    import actorSystem.dispatcher
-
-    actorSystem.scheduler.scheduleOnce(
-      waitDuration(java.time.LocalDateTime.now)
-    ) {
-      action(this.next)
-    }
-  }
-
-}
-
-trait StreamApiReader[E <: Exchange] {}
-
-object TailFromWebSocket {
-  def apply(uri: Uri)(implicit system: ActorSystem, materializer: ActorMaterializer): TailFromWebSocket = {
-    new TailFromWebSocket(uri, Source.empty)
-  }
-}
-
-class TailFromWebSocket private (uri: Uri, firstRequest: Source[Message, _])(
-    implicit system: ActorSystem,
-    materializer: ActorMaterializer
-) {
-
-  import akka.http.scaladsl.model.Uri
-
-  def startsWith(firstRequest: Source[Message, _]) = new TailFromWebSocket(uri, firstRequest)
-
-  def into(sink: Sink[Message, Future[Done]]): Unit = {
-    RetryContext.run(
-      attempt(uri, firstRequest, sink)
-    )
-  }
-
-  private def attempt(uri: Uri, firstRequest: Source[Message, _], sink: Sink[Message, Future[Done]])(
-      retryCtx: RetryContext): Unit = {
-    import system.dispatcher
-
-    val source = (firstRequest concatMat Source.maybe[Message])(Keep.right)
-
-    val flow = Flow
-      .fromSinkAndSourceMat(
-        sink,
-        source
-      )(Keep.right)
-
-    val retryingFlow = Flow[Message]
-      .alsoTo(
-        Sink.onComplete {
-          case Failure(exception) => {
-            println(exception.getMessage)
-            retryCtx.retry()
-          }
-          case Success(done) => {
-            println("connection closed?")
-            retryCtx.retry()
-          }
-        }
-      )
-      .viaMat(flow)(Keep.right)
-
-    val request = WebSocketRequest(uri)
-
-    println(s"sending request to $uri")
-    val (upgradeResponse, promise): (Future[WebSocketUpgradeResponse], Promise[Option[Message]]) =
-      Http().singleWebSocketRequest(request, retryingFlow)
-
-  }
-
 }
 
 class BitMexReader()(
@@ -210,8 +106,8 @@ object DataCollector {
 
     //    bfReader(sink)
     //    mexReader(sink)
-    //    bfReader(sink)
-    testReader(sink)
+    bfReader(sink)
+    // testReader(sink)
 
   }
 }
