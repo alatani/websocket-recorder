@@ -8,6 +8,7 @@ import akka.http.scaladsl.model.ws._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
 
+import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -30,6 +31,11 @@ object TailFromWebSocket {
   }
 }
 
+case class AttemptContext(
+    count: Int,
+    lastAttemtedAt: java.time.ZonedDateTime
+)
+
 class TailFromWebSocket private (uri: Uri, firstRequest: Source[Message, _])(
     implicit system: ActorSystem,
     materializer: ActorMaterializer
@@ -40,43 +46,59 @@ class TailFromWebSocket private (uri: Uri, firstRequest: Source[Message, _])(
   def startsWith(firstRequest: Source[Message, _]) = new TailFromWebSocket(uri, firstRequest)
 
   def into(sink: Sink[Message, Future[Done]]): Unit = {
-    attempt(uri, firstRequest, sink)
+    attempt(uri, firstRequest, sink)(0)
   }
 
   private def attempt(uri: Uri, firstRequest: Source[Message, _], sink: Sink[Message, Future[Done]])(
       attemptCount: Int): Unit = {
     import system.dispatcher
 
-    val flow = Flow.fromSinkAndSourceMat(
-      sink,
+    val source = if (attemptCount > 0) {
+      val weightMsec = (1000 * Math.pow(1.5, attemptCount - 1)).toInt
+      println(s"weighting $weightMsec msec(${attemptCount}th attempt")
+      //TODO: execution contextを専用のやつ使う
+
+      Thread.sleep(weightMsec)
+//      (firstRequest.delay(weightMsec.millisecond) concatMat Source.maybe[Message])(Keep.right)
       (firstRequest concatMat Source.maybe[Message])(Keep.right)
-    )(Keep.right)
+    } else {
+      (firstRequest concatMat Source.maybe[Message])(Keep.right)
+    }
+
+    val flow = Flow
+      .fromSinkAndSourceMat(
+        sink,
+        source
+      )(Keep.right)
+
+    val retryingFlow = Flow[Message]
+      .alsoTo(
+        Sink.onComplete {
+          case Failure(exception) => {
+            println(exception.getMessage)
+            attempt(uri, firstRequest, sink)(attemptCount + 1)
+          }
+          case Success(done) => {
+            println("connection closed?")
+            attempt(uri, firstRequest, sink)(attemptCount + 1)
+          }
+        }
+      )
+      .viaMat(flow)(Keep.right)
 
     val request = WebSocketRequest(uri)
 
+    println(s"sending request to $uri")
     val (upgradeResponse, promise): (Future[WebSocketUpgradeResponse], Promise[Option[Message]]) =
-      Http().singleWebSocketRequest(request, flow)
+      Http().singleWebSocketRequest(request, retryingFlow)
 
     upgradeResponse.onComplete {
       case Failure(exception) => {
-        println(exception.getMessage)
-        attempt(uri, firstRequest, sink)(attemptCount + 1)
+//        println(exception.getMessage)
       }
       case Success(value) => println(s"(attempt = $attemptCount)successfully conneced to $uri ")
     }
 
-    flow.alsoTo(
-      Sink.onComplete {
-        case Failure(exception) => {
-          println(exception.getMessage)
-          attempt(uri, firstRequest, sink)(attemptCount + 1)
-        }
-        case Success(done) => {
-          println("connection closed?")
-          attempt(uri, firstRequest, sink)(attemptCount + 1)
-        }
-      }
-    )
   }
 
 }
@@ -107,20 +129,28 @@ class BitFlyerReader()(
         TextMessage(
           """{"jsonrpc":"2.0", "method": "subscribe", "params": {"channel":"lightning_ticker_BTC_JPY"}}""".stripMargin)
       )
-    /*
-    val flow =
-      Flow.fromSinkAndSourceMat(
-        Sink.foreach[Message](println), //Sink.foreach(println),
-        (bitflyerOutgoing concatMat Source.maybe[Message])(Keep.right)
-      )(Keep.right)
 
-    val (upgradeResponse, promise) = Http().singleWebSocketRequest(WebSocketRequest(bitflyer), flow)
-    //TODO: here error handling
-    promise
-     */
     TailFromWebSocket(bitflyer).startsWith(subscribe).into(sink)
   }
 
+}
+class TestReader()(
+    implicit
+    system: ActorSystem,
+    materializer: ActorMaterializer
+) {
+
+  val bitflyer = "ws://127.0.0.1:4001"
+
+  def apply(sink: Sink[Message, Future[Done]]): Unit = {
+    val subscribe =
+      Source.single(
+        TextMessage(
+          """{"jsonrpc":"2.0", "method": "subscribe", "params": {"channel":"lightning_ticker_BTC_JPY"}}""".stripMargin)
+      )
+//    TailFromWebSocket(bitflyer).startsWith(subscribe).into(sink)
+    TailFromWebSocket(bitflyer).startsWith(subscribe).into(sink)
+  }
 }
 
 trait WebSocketModules {
@@ -132,8 +162,6 @@ trait WebSocketModules {
 object WebSocketModulesImpl {
   implicit lazy val system: ActorSystem = ActorSystem()
   implicit lazy val materializer: ActorMaterializer = ActorMaterializer()
-
-  implicit lazy val tailFromWebSocket: TailFromWebSocket = new TailFromWebSocket()
 }
 
 object DataCollector {
@@ -153,10 +181,12 @@ object DataCollector {
 
     val mexReader = new BitMexReader()
     val bfReader = new BitFlyerReader()
+    val testReader = new TestReader()
 
 //    bfReader(sink)
 //    mexReader(sink)
-    bfReader(sink)
+//    bfReader(sink)
+    testReader(sink)
 
   }
 }
