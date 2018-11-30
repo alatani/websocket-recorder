@@ -1,5 +1,8 @@
 package external
 
+import java.io.FileNotFoundException
+import java.time.ZonedDateTime
+
 import akka.Done
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
@@ -8,7 +11,6 @@ import akka.http.scaladsl.model.ws._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
 
-import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -16,9 +18,52 @@ sealed trait Exchange {
   def name: String
 }
 object Exchanges {
-
   case object BitFlyer extends Exchange {
     def name = "bitFlyer"
+  }
+}
+
+object RetryContext {
+  private val ResetSeconds = 3
+  def run(action: RetryContext => Unit)(implicit actorSystem: ActorSystem): Unit = {
+    action(
+      RetryContext(action, 0, java.time.LocalDateTime.now())
+    )
+  }
+}
+
+case class RetryContext private (action: RetryContext => Unit, count: Int = 0, attemptedAt: java.time.LocalDateTime) {
+  import scala.concurrent.duration._
+
+  private def toReset(now: java.time.LocalDateTime) = now.isAfter(attemptedAt.plusSeconds(RetryContext.ResetSeconds))
+
+  private def next = {
+    val now = java.time.LocalDateTime.now
+    if (toReset(now)) {
+      RetryContext(action, 0, java.time.LocalDateTime.now)
+    } else {
+      RetryContext(action, count + 1, now)
+    }
+  }
+
+  private def waitDuration(now: java.time.LocalDateTime) = {
+    val waitMsec = if (toReset(now)) {
+      1000
+    } else {
+      (1000 * Math.pow(2, count)).toInt
+    }
+    println(s"waiting ${waitMsec} ms")
+    waitMsec.milliseconds
+  }
+
+  def retry()(implicit actorSystem: ActorSystem): Unit = {
+    import actorSystem.dispatcher
+
+    actorSystem.scheduler.scheduleOnce(
+      waitDuration(java.time.LocalDateTime.now)
+    ) {
+      action(this.next)
+    }
   }
 
 }
@@ -31,11 +76,6 @@ object TailFromWebSocket {
   }
 }
 
-case class AttemptContext(
-    count: Int,
-    lastAttemtedAt: java.time.ZonedDateTime
-)
-
 class TailFromWebSocket private (uri: Uri, firstRequest: Source[Message, _])(
     implicit system: ActorSystem,
     materializer: ActorMaterializer
@@ -46,24 +86,16 @@ class TailFromWebSocket private (uri: Uri, firstRequest: Source[Message, _])(
   def startsWith(firstRequest: Source[Message, _]) = new TailFromWebSocket(uri, firstRequest)
 
   def into(sink: Sink[Message, Future[Done]]): Unit = {
-    attempt(uri, firstRequest, sink)(0)
+    RetryContext.run(
+      attempt(uri, firstRequest, sink)
+    )
   }
 
   private def attempt(uri: Uri, firstRequest: Source[Message, _], sink: Sink[Message, Future[Done]])(
-      attemptCount: Int): Unit = {
+      retryCtx: RetryContext): Unit = {
     import system.dispatcher
 
-    val source = if (attemptCount > 0) {
-      val weightMsec = (1000 * Math.pow(1.5, attemptCount - 1)).toInt
-      println(s"weighting $weightMsec msec(${attemptCount}th attempt")
-      //TODO: execution contextを専用のやつ使う
-
-      Thread.sleep(weightMsec)
-//      (firstRequest.delay(weightMsec.millisecond) concatMat Source.maybe[Message])(Keep.right)
-      (firstRequest concatMat Source.maybe[Message])(Keep.right)
-    } else {
-      (firstRequest concatMat Source.maybe[Message])(Keep.right)
-    }
+    val source = (firstRequest concatMat Source.maybe[Message])(Keep.right)
 
     val flow = Flow
       .fromSinkAndSourceMat(
@@ -76,11 +108,11 @@ class TailFromWebSocket private (uri: Uri, firstRequest: Source[Message, _])(
         Sink.onComplete {
           case Failure(exception) => {
             println(exception.getMessage)
-            attempt(uri, firstRequest, sink)(attemptCount + 1)
+            retryCtx.retry()
           }
           case Success(done) => {
             println("connection closed?")
-            attempt(uri, firstRequest, sink)(attemptCount + 1)
+            retryCtx.retry()
           }
         }
       )
@@ -91,13 +123,6 @@ class TailFromWebSocket private (uri: Uri, firstRequest: Source[Message, _])(
     println(s"sending request to $uri")
     val (upgradeResponse, promise): (Future[WebSocketUpgradeResponse], Promise[Option[Message]]) =
       Http().singleWebSocketRequest(request, retryingFlow)
-
-    upgradeResponse.onComplete {
-      case Failure(exception) => {
-//        println(exception.getMessage)
-      }
-      case Success(value) => println(s"(attempt = $attemptCount)successfully conneced to $uri ")
-    }
 
   }
 
@@ -166,8 +191,8 @@ object WebSocketModulesImpl {
 
 object DataCollector {
   def main(args: Array[String]) = {
-//    implicit val system = ActorSystem()
-//    implicit val materializer = ActorMaterializer()
+    //    implicit val system = ActorSystem()
+    //    implicit val materializer = ActorMaterializer()
 
     import WebSocketModulesImpl._
 
@@ -183,9 +208,9 @@ object DataCollector {
     val bfReader = new BitFlyerReader()
     val testReader = new TestReader()
 
-//    bfReader(sink)
-//    mexReader(sink)
-//    bfReader(sink)
+    //    bfReader(sink)
+    //    mexReader(sink)
+    //    bfReader(sink)
     testReader(sink)
 
   }
