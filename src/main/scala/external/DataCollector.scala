@@ -1,19 +1,14 @@
 package external
 
-import java.io.FileNotFoundException
-import java.time.ZonedDateTime
-
 import akka.Done
 import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.ws._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
+import external.gcs.GcsSink
 import external.websocket.TailFromWebSocket
 
-import scala.concurrent.{Future, Promise}
-import scala.util.{Failure, Success}
+import scala.concurrent.Future
 
 sealed trait Exchange {
   def name: String
@@ -87,10 +82,10 @@ object WebSocketModulesImpl {
 
 object DataCollector {
   def main(args: Array[String]) = {
-    //    implicit val system = ActorSystem()
-    //    implicit val materializer = ActorMaterializer()
 
     import WebSocketModulesImpl._
+
+    import scala.concurrent.duration._
 
     val sink: Sink[Message, Future[Done]] =
       Sink.foreach[Message] {
@@ -106,7 +101,17 @@ object DataCollector {
 
     //    bfReader(sink)
     //    mexReader(sink)
-    bfReader(sink)
+
+//    import scala.con
+    val gcsSink = GcsSink("hoge").store("tsubaki/test-log/")(1000, 5.second)
+
+    val bfSink = Flow[Message]
+      .collect {
+        case text: TextMessage.Strict => text.text
+      }
+      .to(gcsSink)
+    bfReader(
+      )
     // testReader(sink)
 
   }

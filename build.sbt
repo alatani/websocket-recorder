@@ -13,7 +13,12 @@ lazy val tsubaki = (project in file("."))
       "com.typesafe.akka" %% "akka-stream-contrib" % Versions.akka_contrib,
       "io.circe" %% "circe-generic" % Versions.circe,
       "io.circe" %% "circe-parser" % Versions.circe,
-      "io.circe" %% "circe-generic-extras" % Versions.circe
+      "io.circe" %% "circe-generic-extras" % Versions.circe,
+
+      "com.google.cloud" % "google-cloud-storage" % Versions.google_cloud_storage,
+
+      "com.typesafe.scala-logging" %% "scala-logging" % "3.9.0",
+      "ch.qos.logback" % "logback-classic" % "1.2.3"
     )
   )
 
