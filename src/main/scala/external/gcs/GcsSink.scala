@@ -4,9 +4,7 @@ import java.nio.charset.StandardCharsets
 
 import akka.NotUsed
 import akka.stream.scaladsl._
-import com.google.cloud.storage.Bucket
-import com.google.cloud.storage.BucketInfo
-import com.google.cloud.storage.StorageOptions
+import com.google.cloud.storage.{Bucket, StorageOptions}
 
 class GcsSink(bucket: Bucket) {
   import scala.concurrent.duration._
@@ -16,12 +14,13 @@ class GcsSink(bucket: Bucket) {
       groupedWithin: FiniteDuration = 60.seconds): Sink[String, NotUsed] = {
 
     Flow[String].groupedWithin(10000, groupedWithin).to {
+
       Sink.foreach { grouped =>
 //        val content = grouped.mkString("\n").getBytes(StandardCharsets.UTF_8)
         val content = grouped.mkString("\n").getBytes(StandardCharsets.UTF_8)
 
-        println(content)
-        println("-------------")
+        println(grouped.mkString("\n"))
+        println(s"lines: ${grouped.size}-------------")
         //        bucket.create(path, content, contentType)
       }
     }
@@ -35,8 +34,7 @@ object GcsSink {
     // Instantiates a client
     val storage = StorageOptions.getDefaultInstance.getService
     // Creates the new bucket
-    val bucket = storage.create(BucketInfo.of(bucketName))
-
+    val bucket = storage.get(bucketName)
     new GcsSink(bucket)
   }
 }

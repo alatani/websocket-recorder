@@ -26,7 +26,7 @@ class BitMexReader()(
 ) {
   val bitmex = "wss://www.bitmex.com/realtime?subscribe=liquidation,quote,trade"
 
-  def apply(sink: Sink[Message, Future[Done]]): Unit = {
+  def apply(sink: Sink[Message, _]): Unit = {
     TailFromWebSocket(bitmex).into(sink)
   }
 }
@@ -39,7 +39,7 @@ class BitFlyerReader()(
 
   val bitflyer = "wss://ws.lightstream.bitflyer.com/json-rpc"
 
-  def apply(sink: Sink[Message, Future[Done]]): Unit = {
+  def apply(sink: Sink[Message, _]): Unit = {
     val subscribe =
       Source.single(
         TextMessage(
@@ -58,7 +58,7 @@ class TestReader()(
 
   val bitflyer = "ws://127.0.0.1:4001"
 
-  def apply(sink: Sink[Message, Future[Done]]): Unit = {
+  def apply(sink: Sink[Message, _]): Unit = {
     val subscribe =
       Source.single(
         TextMessage(
@@ -103,16 +103,16 @@ object DataCollector {
     //    mexReader(sink)
 
 //    import scala.con
-    val gcsSink = GcsSink("hoge").store("tsubaki/test-log/")(1000, 5.second)
+    val gcsSink = GcsSink("pandora-log").store("tsubaki/test-log/")(1000, 5.second)
 
     val bfSink = Flow[Message]
       .collect {
         case text: TextMessage.Strict => text.text
       }
       .to(gcsSink)
-    bfReader(
-      )
-    // testReader(sink)
+//    bfReader(bfSink)
+
+    testReader(sink)
 
   }
 }

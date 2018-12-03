@@ -1,6 +1,5 @@
 package external.websocket
 
-import akka.Done
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.Uri
@@ -20,13 +19,13 @@ class TailFromWebSocket private (uri: Uri, firstRequest: Source[Message, _])(
 
   def startsWith(firstRequest: Source[Message, _]) = new TailFromWebSocket(uri, firstRequest)
 
-  def into(sink: Sink[Message, Future[Done]]): Unit = {
+  def into(sink: Sink[Message, _]): Unit = {
     RetryContext.run(
       attempt(uri, firstRequest, sink)
     )
   }
 
-  private def attempt(uri: Uri, firstRequest: Source[Message, _], sink: Sink[Message, Future[Done]])(
+  private def attempt(uri: Uri, firstRequest: Source[Message, _], sink: Sink[Message, _])(
       retryCtx: RetryContext): Unit = {
 
     val source = (firstRequest concatMat Source.maybe[Message])(Keep.right)
