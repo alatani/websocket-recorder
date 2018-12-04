@@ -1,12 +1,11 @@
 package external
 
-import akka.Done
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model.ws._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
-import external.gcs.GcsSink
-import external.websocket.TailFromWebSocket
+import akka.{Done, NotUsed}
+import external.websocket.RetryWebSocketSource
 
 import scala.concurrent.Future
 
@@ -19,61 +18,48 @@ object Exchanges {
   }
 }
 
-class BitMexReader()(
-    implicit
-    system: ActorSystem,
-    materializer: ActorMaterializer
-) {
+trait ExchangeSource {
+  def apply(): Source[Message, NotUsed]
+}
+
+class BitMexSource()(implicit system: ActorSystem) extends ExchangeSource {
   val bitmex = "wss://www.bitmex.com/realtime?subscribe=liquidation,quote,trade"
 
-  def apply(sink: Sink[Message, _]): Unit = {
-    TailFromWebSocket(bitmex).into(sink)
-  }
+  def apply(): Source[Message, NotUsed] = RetryWebSocketSource(bitmex)
 }
 
-class BitFlyerReader()(
-    implicit
-    system: ActorSystem,
-    materializer: ActorMaterializer
-) {
-
+class BitFlyerSource()(implicit system: ActorSystem) extends ExchangeSource {
   val bitflyer = "wss://ws.lightstream.bitflyer.com/json-rpc"
 
-  def apply(sink: Sink[Message, _]): Unit = {
-    val subscribe =
+  def apply(): Source[Message, NotUsed] = {
+    RetryWebSocketSource(
+      bitflyer,
       Source.single(
         TextMessage(
           """{"jsonrpc":"2.0", "method": "subscribe", "params": {"channel":"lightning_ticker_BTC_JPY"}}""".stripMargin)
-      )
-
-    TailFromWebSocket(bitflyer).startsWith(subscribe).into(sink)
+      ))
   }
 
 }
-class TestReader()(
-    implicit
-    system: ActorSystem,
-    materializer: ActorMaterializer
-) {
+class TestSource()(
+    implicit system: ActorSystem
+) extends ExchangeSource {
+  val localhost = "ws://127.0.0.1:4001"
 
-  val bitflyer = "ws://127.0.0.1:4001"
-
-  def apply(sink: Sink[Message, _]): Unit = {
-    val subscribe =
+  def apply(): Source[Message, NotUsed] = {
+    RetryWebSocketSource(
+      localhost,
       Source.single(
         TextMessage(
           """{"jsonrpc":"2.0", "method": "subscribe", "params": {"channel":"lightning_ticker_BTC_JPY"}}""".stripMargin)
       )
-//    TailFromWebSocket(bitflyer).startsWith(subscribe).into(sink)
-    TailFromWebSocket(bitflyer).startsWith(subscribe).into(sink)
+    )
   }
 }
 
 trait WebSocketModules {
   implicit def system: ActorSystem
   implicit def materializer: ActorMaterializer
-
-  implicit def tailFromWebSocket: TailFromWebSocket
 }
 object WebSocketModulesImpl {
   implicit lazy val system: ActorSystem = ActorSystem()
@@ -85,8 +71,6 @@ object DataCollector {
 
     import WebSocketModulesImpl._
 
-    import scala.concurrent.duration._
-
     val sink: Sink[Message, Future[Done]] =
       Sink.foreach[Message] {
         case message: TextMessage.Strict =>
@@ -95,24 +79,23 @@ object DataCollector {
           println(s"Other: $message")
       }
 
-    val mexReader = new BitMexReader()
-    val bfReader = new BitFlyerReader()
-    val testReader = new TestReader()
+    val mexSource = new BitMexSource()
+    val bfSource = new BitFlyerSource()
+    val testSource = new TestSource()
 
-    //    bfReader(sink)
-    //    mexReader(sink)
+//    val gcsSink = GcsSink("pandora-log").store("tsubaki/test-log/")(1000, 5.second)
+//
+//    val bfSink = Flow[Message]
+//      .collect {
+//        case text: TextMessage.Strict => text.text
+//      }
+//      .to(gcsSink)
+//    bfSource(bfSink)
 
-//    import scala.con
-    val gcsSink = GcsSink("pandora-log").store("tsubaki/test-log/")(1000, 5.second)
+    //    bfSource(sink)
+    //    mexSource(sink)
+    testSource().to(sink).run()
 
-    val bfSink = Flow[Message]
-      .collect {
-        case text: TextMessage.Strict => text.text
-      }
-      .to(gcsSink)
-//    bfReader(bfSink)
-
-    testReader(sink)
-
+    ()
   }
 }
