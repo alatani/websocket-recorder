@@ -22,25 +22,31 @@ class GcsSink() {
     // Creates the new bucket
     val bucket = storage.get(bucketName)
 
-    def dumpToGcsSink = Sink.foreach[(ZonedDateTime, Seq[T])] {
-      case (timestamp, grouped) =>
-        //        val content = grouped.mkString("\n").getBytes(StandardCharsets.UTF_8)
-        val content = grouped.mkString("\n").getBytes(StandardCharsets.UTF_8)
+//    def dumpToGcsSink = Sink.foreach[(ZonedDateTime, Seq[T])] {
+    def dumpToGcsSink =
+      Flow[(ZonedDateTime, Seq[T])]
+        .map {
+          case (timestamp, grouped) =>
+            //        val content = grouped.mkString("\n").getBytes(StandardCharsets.UTF_8)
+            val content = grouped.mkString("\n").getBytes(StandardCharsets.UTF_8)
 
-        println(s"lines: ${grouped.size}-------------")
+            println(s"lines: ${grouped.size}-------------")
 
-        val serializer = implicitly[StorageBatchSerializer[T]]
+            val serializer = implicitly[StorageBatchSerializer[T]]
 
-        val blobName = namingPolicy.blobName(path, serializer.extension, timestamp)
+            val blobName = namingPolicy.blobName(path, serializer.extension, timestamp)
 
-        if (scala.util.Random.nextDouble() < 0.95) {
-          println(s"creating to $blobName")
-          bucket.create(blobName, serializer.encode(grouped), serializer.contentType)
-        } else {
-          println(s"exception!!!")
-          throw new Exception("test exception!!!")
+            if (scala.util.Random.nextDouble() < 0.95) {
+              println(s"creating to $blobName")
+              bucket.create(blobName, serializer.encode(grouped), serializer.contentType)
+            } else {
+              println(s"exception!!!")
+              throw new Exception("test exception!!!")
+            }
         }
-    }
+        .recover { case e => throw e }
+        .toMat(Sink.ignore)(Keep.right)
+
     Flow[T]
       .groupedWithin(maxChunkSize, groupedWithin)
       .map { grouped =>
