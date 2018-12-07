@@ -18,7 +18,10 @@ lazy val tsubaki = (project in file("."))
       "com.google.cloud" % "google-cloud-storage" % Versions.google_cloud_storage,
 
       "com.typesafe.scala-logging" %% "scala-logging" % "3.9.0",
-      "ch.qos.logback" % "logback-classic" % "1.2.3"
+      "ch.qos.logback" % "logback-classic" % "1.2.3",
+
+      "org.scalatest" %% "scalatest" % "3.0.1"  % Test,
+      "org.scalamock" %% "scalamock" % "4.1.0" % Test
     )
   )
 

@@ -5,6 +5,7 @@ import akka.http.scaladsl.model.ws._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
 import akka.{Done, NotUsed}
+import external.gcs.GcsSink
 import external.websocket.RetryWebSocketSource
 
 import scala.concurrent.Future
@@ -12,6 +13,7 @@ import scala.concurrent.Future
 sealed trait Exchange {
   def name: String
 }
+
 object Exchanges {
   case object BitFlyer extends Exchange {
     def name = "bitFlyer"
@@ -34,10 +36,13 @@ class BitFlyerSource()(implicit system: ActorSystem) extends ExchangeSource {
   def apply(): Source[Message, NotUsed] = {
     RetryWebSocketSource(
       bitflyer,
-      Source.single(
-        TextMessage(
-          """{"jsonrpc":"2.0", "method": "subscribe", "params": {"channel":"lightning_ticker_BTC_JPY"}}""".stripMargin)
-      ))
+      Source.apply {
+        scala.collection.immutable.Iterable(
+          TextMessage("""{"jsonrpc":"2.0", "method": "subscribe", "params": {"channel":"lightning_ticker_BTC_JPY"}}"""),
+        )
+      }
+    )
+
   }
 
 }
@@ -75,26 +80,46 @@ object DataCollector {
       Sink.foreach[Message] {
         case message: TextMessage.Strict =>
           println(s"TextMessage.Strict: ${message.text}")
-        case message =>
+        case message => {
+
           println(s"Other: $message")
+        }
       }
 
     val mexSource = new BitMexSource()
     val bfSource = new BitFlyerSource()
     val testSource = new TestSource()
 
-//    val gcsSink = GcsSink("pandora-log").store("tsubaki/test-log/")(1000, 5.second)
-//
-//    val bfSink = Flow[Message]
-//      .collect {
-//        case text: TextMessage.Strict => text.text
-//      }
-//      .to(gcsSink)
-//    bfSource(bfSink)
+    val idd = Flow.apply[Message]
 
     //    bfSource(sink)
-    //    mexSource(sink)
-    testSource().to(sink).run()
+//    mexSource().to(sink).run()
+    //bfSource().to(sink).run()
+//    testSource().to(sink).run()
+
+    val res = (1 to 10000).map { i =>
+      Thread.sleep(1)
+      s"line: $i"
+    }
+    val countupString = Source(res)
+
+//    val gcsSink = GcsSink("pandora-log").store("tsubaki/test-log/")(1000, 5.second)
+
+    val gcsSink = new GcsSink().apply[String]("pandora-log", "tsubaki/test2", 100)
+
+    countupString.to(gcsSink).run()
+
+//    RunnableGraph
+//      .fromGraph(GraphDSL.create() { implicit builder: GraphDSL.Builder[NotUsed] =>
+//        import GraphDSL.Implicits._
+//        import akka.stream.ClosedShape
+//
+//        bfSource() ~> sink
+//        mexSource() ~> sink
+//
+//        ClosedShape
+//      })
+//      .run()
 
     ()
   }
