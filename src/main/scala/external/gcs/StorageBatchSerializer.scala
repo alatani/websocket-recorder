@@ -1,5 +1,7 @@
 package external.gcs
 
+import java.io.StringWriter
+
 // Tのリストから、GCS上に配置するためのInputStreamを生成する
 trait StorageBatchSerializer[T] {
   def encode[T](grouped: Seq[T]): java.io.InputStream
@@ -12,11 +14,14 @@ trait StorageBatchSerializer[T] {
 object StorageBatchSerializer {
   implicit object string extends StorageBatchSerializer[String] {
     def encode[T](grouped: Seq[T]): java.io.InputStream = {
-      val str = grouped.mkString("\n")
-
       import java.io.ByteArrayInputStream
       import java.nio.charset.StandardCharsets
-      new ByteArrayInputStream(str.getBytes(StandardCharsets.UTF_8))
+
+      val builder = new StringBuilder()
+      grouped.foreach { line =>
+        builder.append(line + "\n")
+      }
+      new ByteArrayInputStream(builder.mkString.getBytes(StandardCharsets.UTF_8))
     }
 
     def contentType: String = "text/plain" // = "application/json"

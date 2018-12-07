@@ -1,11 +1,13 @@
 package external
 
+import java.time.ZonedDateTime
+
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model.ws._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
 import akka.{Done, NotUsed}
-import external.gcs.GcsSink
+import external.gcs.{GcsSink, TimestampedMessage}
 import external.websocket.RetryWebSocketSource
 
 import scala.concurrent.Future
@@ -97,15 +99,19 @@ object DataCollector {
     //bfSource().to(sink).run()
 //    testSource().to(sink).run()
 
-    val res = (1 to 10000).map { i =>
-      Thread.sleep(1)
-      s"line: $i"
-    }
-    val countupString = Source(res)
+    val countupString = Source
+      .fromIterator { () =>
+        Iterator
+          .iterate(1) { i =>
+            Thread.sleep(3)
+            i + 1
+          }
+          .take(1000)
+      }
+      .map(i => f"$i%04d")
+      .map(i => TimestampedMessage[String](ZonedDateTime.now, i))
 
-//    val gcsSink = GcsSink("pandora-log").store("tsubaki/test-log/")(1000, 5.second)
-
-    val gcsSink = new GcsSink().apply[String]("pandora-log", "tsubaki/test2", 100)
+    val gcsSink = new GcsSink().apply[String]("tsubaki", "rawlog/test2", 10)
 
     countupString.to(gcsSink).run()
 

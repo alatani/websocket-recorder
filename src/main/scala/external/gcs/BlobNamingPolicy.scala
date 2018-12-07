@@ -5,19 +5,25 @@ import java.time.ZonedDateTime
 import external.ReaderSession
 
 trait BlobNamingPolicy {
-  def blobName(basePath: String, extension: String, now: ZonedDateTime): String
+  def blobName(basePath: String,
+               extension: String,
+               now: ZonedDateTime,
+               digest: String = BlobNamingPolicy.randomDigest): String
 }
 
 object BlobNamingPolicy {
   implicit val instance: BlobNamingPolicy = new ReaderSessionBlobNamingPolicy
+
+  def randomDigest: String = scala.util.Random.alphanumeric.take(4).mkString
 }
 
 class ReaderSessionBlobNamingPolicy extends BlobNamingPolicy {
 
-  def blobName(basePath: String, extension: String, now: ZonedDateTime): String = {
-    val msecOfSecond = now.getNano / 1000 / 1000
+  def blobName(basePath: String,
+               extension: String,
+               now: ZonedDateTime,
+               digest: String = BlobNamingPolicy.randomDigest): String = {
     val session = ReaderSession().value
-
     val nExtension = if (extension.startsWith(".")) extension.drop(1) else extension
 
     Seq(
@@ -27,7 +33,7 @@ class ReaderSessionBlobNamingPolicy extends BlobNamingPolicy {
       f"day=${now.getDayOfMonth}%02d",
       f"hour=${now.getHour}%02d",
       f"min=${now.getMinute}%02d",
-      f"sec=${now.getSecond}%02d.${msecOfSecond}%03d.${session}.$nExtension",
+      f"sec=${now.getSecond}%02d.sess=${session}.digest=${digest}.$nExtension",
     ).mkString("/")
   }
 }
