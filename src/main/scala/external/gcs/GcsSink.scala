@@ -60,26 +60,24 @@ class GcsSink() extends LazyLogging {
         case grouped if grouped.nonEmpty =>
           // groupedはnonEmptyなのでminByは成功する
           val timestamp = grouped.map(_.timestamp).minBy(_.toInstant.getEpochSecond)
-          val payloads = grouped.map(_.payload)
-          (timestamp, payloads)
+
+          val serializer = implicitly[StorageBatchSerializer[T]]
+
+          val blob = serializer.encode(grouped.map(_.payload))
+          val blobName = namingPolicy.blobName(path, serializer.extension, timestamp)
+          (blobName, blob, serializer.contentType)
       }
       .async
       .to {
         Sink.foreachAsync(parallelism) {
-          case (timestamp, grouped) =>
+          case (blobName, blob, contentType) =>
             backoffRetry(1.second, 60.second) { () =>
               import actorSystem.dispatcher
               Future {
-                logger.info(s"grouped with size :${grouped.size}")
                 val serializer = implicitly[StorageBatchSerializer[T]]
-                val blobName = namingPolicy.blobName(path, serializer.extension, timestamp)
 
-                if (scala.util.Random.nextDouble() < 0.8) {
-                  logger.info(s"uploading to $blobName: ${grouped.head}")
-                  bucket.create(blobName, serializer.encode(grouped), serializer.contentType)
-                } else {
-                  throw new StorageException(500, "test error")
-                }
+                logger.info(s"uploading to $blobName")
+                bucket.create(blobName, blob, contentType)
               }
             }
         }

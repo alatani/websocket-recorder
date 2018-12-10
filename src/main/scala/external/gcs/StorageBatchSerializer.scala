@@ -1,7 +1,5 @@
 package external.gcs
 
-import java.io.StringWriter
-
 // Tのリストから、GCS上に配置するためのInputStreamを生成する
 trait StorageBatchSerializer[T] {
   def encode[T](grouped: Seq[T]): java.io.InputStream
