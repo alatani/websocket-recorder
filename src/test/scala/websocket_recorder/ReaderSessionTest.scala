@@ -1,4 +1,4 @@
-package external
+package websocket_recorder
 
 import org.scalatest.{FunSuite, Matchers}
 

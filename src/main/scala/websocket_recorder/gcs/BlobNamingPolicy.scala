@@ -1,8 +1,8 @@
-package external.gcs
+package websocket_recorder.gcs
 
 import java.time.ZonedDateTime
 
-import external.ReaderSession
+import websocket_recorder.ReaderSession
 
 trait BlobNamingPolicy {
   def blobName(basePath: String,

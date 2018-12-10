@@ -1,11 +1,11 @@
-package external.gcs
+package websocket_recorder.gcs
 
-import domain.support.JST
 import java.time.ZonedDateTime
 
-import external.ReaderSession
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.{FunSuite, Matchers}
+import websocket_recorder.ReaderSession
+import websocket_recorder.support.JST
 
 class ReaderSessionBlobNamingPolicyTest extends FunSuite with Matchers with MockFactory {
 

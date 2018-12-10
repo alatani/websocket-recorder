@@ -1,4 +1,4 @@
-package external.websocket
+package websocket_recorder
 
 import akka.NotUsed
 import akka.actor.ActorSystem

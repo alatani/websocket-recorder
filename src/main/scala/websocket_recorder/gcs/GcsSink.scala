@@ -1,4 +1,4 @@
-package external.gcs
+package websocket_recorder.gcs
 
 import java.time.ZonedDateTime
 

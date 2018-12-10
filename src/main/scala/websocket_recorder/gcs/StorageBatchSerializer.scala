@@ -1,4 +1,4 @@
-package external.gcs
+package websocket_recorder.gcs
 
 // Tのリストから、GCS上に配置するためのInputStreamを生成する
 trait StorageBatchSerializer[T] {

@@ -1,4 +1,4 @@
-package external
+package websocket_recorder
 
 case class ReaderSession private (value: String) {
   override def toString: String = value
